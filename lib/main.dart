@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -30,14 +31,24 @@ class WebViewScreen extends StatefulWidget {
 
 class _WebViewScreenState extends State<WebViewScreen> {
   late final WebViewController _controller;
+  late final ZenitBridge _bridge;
   int _progress = 0;
   bool _hasError = false;
+  // Emulador Android: usar 10.0.2.2 para llegar al localhost del host.
+  // Dispositivo físico: usar la IP LAN del host (ej. 192.168.x.x) y Vite con --host 0.0.0.0.
+  final TextEditingController _webUrlController = TextEditingController(
+    text: 'http://10.0.2.2:5173/',
+  );
+  final TextEditingController _baseUrlController = TextEditingController(
+    text: 'http://10.0.2.2:3200/api/v1',
+  );
+  final TextEditingController _accessTokenController = TextEditingController();
+  final TextEditingController _sdkTokenController = TextEditingController();
   final TextEditingController _mapIdController =
       TextEditingController(text: '19');
   final TextEditingController _promotorController =
       TextEditingController(text: 'PROMOTOR DEMO');
   final List<String> _eventLogs = [];
-  final String _webUrl = 'http://10.0.2.2:5173/';
 
   @override
   void initState() {
@@ -46,29 +57,48 @@ class _WebViewScreenState extends State<WebViewScreen> {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..addJavaScriptChannel(
-        'ZenitBridge',
+        'ZenitNative',
         onMessageReceived: (message) => _handleWebEvent(message.message),
       )
       ..setNavigationDelegate(
         NavigationDelegate(
           onProgress: (progress) => setState(() => _progress = progress),
-          onPageStarted: (_) => setState(() {
-            _hasError = false;
-            _progress = 0;
-          }),
+          onPageStarted: (_) {
+            setState(() {
+              _hasError = false;
+              _progress = 0;
+            });
+            _bridge.onPageStarted();
+          },
           onPageFinished: (_) async {
             setState(() => _progress = 100);
-            await _injectRuntimeConfig();
+            await _bridge.onPageFinished();
           },
           onWebResourceError: (err) {
             debugPrint('WEBVIEW ERROR: code=${err.errorCode} '
                 'type=${err.errorType} desc=${err.description} '
                 'url=${err.url}');
+            _appendLog(
+              'WebView error: code=${err.errorCode} '
+              'type=${err.errorType} desc=${err.description} url=${err.url}',
+            );
             setState(() => _hasError = true);
           },
         ),
-      )
-      ..loadRequest(Uri.parse(_webUrl));
+      );
+
+    _bridge = ZenitBridge(controller: _controller);
+
+    _loadWebUrl();
+  }
+
+  Future<void> _loadWebUrl() async {
+    final url = _webUrlController.text.trim();
+    if (url.isEmpty) {
+      _appendLog('WebView: URL vacía, no se puede cargar.');
+      return;
+    }
+    await _controller.loadRequest(Uri.parse(url));
   }
 
   Future<bool> _onWillPop() async {
@@ -112,13 +142,17 @@ class _WebViewScreenState extends State<WebViewScreen> {
                 ),
               ),
               _ConfigPanel(
+                webUrlController: _webUrlController,
+                baseUrlController: _baseUrlController,
+                accessTokenController: _accessTokenController,
+                sdkTokenController: _sdkTokenController,
                 mapIdController: _mapIdController,
                 promotorController: _promotorController,
                 logs: _eventLogs,
                 onApplyFilters: _sendFilters,
                 onClearFilters: _clearFilters,
-                onSendRuntimeConfig: _injectRuntimeConfig,
-                onReload: () => _controller.reload(),
+                onSendRuntimeConfig: _sendRuntimeConfig,
+                onReload: _loadWebUrl,
               ),
             ],
           ),
@@ -127,14 +161,16 @@ class _WebViewScreenState extends State<WebViewScreen> {
     );
   }
 
-  Map<String, dynamic> get _runtimeConfig => {
-        // TODO: Reemplazar por la baseUrl real según entorno.
-        'baseUrl': 'https://api.dev.zenit.example.com',
-        // TODO: No hardcodear tokens en producción.
-        'sdkToken': 'DEMO_TOKEN_REEMPLAZAR',
-        'mapId': _mapIdController.text.trim(),
-        'defaultFilters': _buildFiltersPayload(),
-      };
+  ZenitRuntimeConfig _buildRuntimeConfig() {
+    final mapId = int.tryParse(_mapIdController.text.trim());
+    return ZenitRuntimeConfig(
+      baseUrl: _baseUrlController.text.trim(),
+      accessToken: _accessTokenController.text.trim(),
+      sdkToken: _sdkTokenController.text.trim(),
+      mapId: mapId,
+      defaultFilters: _buildFiltersPayload(),
+    );
+  }
 
   Map<String, dynamic> _buildFiltersPayload() {
     final promotor = _promotorController.text.trim();
@@ -144,34 +180,39 @@ class _WebViewScreenState extends State<WebViewScreen> {
     return {'PROMOTOR': promotor};
   }
 
-  Future<void> _injectRuntimeConfig() async {
-    final payload = jsonEncode(_runtimeConfig);
-    await _controller.runJavaScript('''
-window.__ZENIT_RUNTIME_CONFIG__ = $payload;
-window.dispatchEvent(new CustomEvent('zenit:runtime-config', { detail: window.__ZENIT_RUNTIME_CONFIG__ }));
-''');
+  Future<void> _sendRuntimeConfig() async {
+    await _bridge.sendRuntimeConfig(_buildRuntimeConfig());
     _appendLog('Flutter -> Web: runtime-config enviado');
   }
 
   Future<void> _sendFilters() async {
-    final payload = jsonEncode(_buildFiltersPayload());
-    await _controller.runJavaScript('''
-window.dispatchEvent(new CustomEvent('zenit:set-filters', { detail: $payload }));
-''');
+    await _bridge.setFilters(_buildFiltersPayload());
     _appendLog('Flutter -> Web: filtros enviados');
   }
 
   Future<void> _clearFilters() async {
-    await _controller.runJavaScript('''
-window.dispatchEvent(new CustomEvent('zenit:clear-filters'));
-window.dispatchEvent(new CustomEvent('zenit:set-filters', { detail: {} }));
-''');
+    await _bridge.clearFilters();
     _appendLog('Flutter -> Web: filtros limpiados');
   }
 
   void _handleWebEvent(String message) {
     try {
-      final decoded = jsonDecode(message);
+      final decoded = jsonDecode(message) as Map<String, dynamic>;
+      final type = decoded['type']?.toString() ?? 'unknown';
+      if (type == 'console') {
+        final level = decoded['level']?.toString() ?? 'log';
+        _appendLog('console.$level ${decoded['args']}');
+        return;
+      }
+      if (type == 'event') {
+        final name = decoded['name']?.toString() ?? 'event';
+        _appendLog('Web event: $name detail=${decoded['detail']}');
+        return;
+      }
+      if (type == 'error') {
+        _appendLog('Web error: ${decoded['message']}');
+        return;
+      }
       _appendLog('Web -> Flutter: $decoded');
     } catch (_) {
       _appendLog('Web -> Flutter (texto): $message');
@@ -181,7 +222,7 @@ window.dispatchEvent(new CustomEvent('zenit:set-filters', { detail: {} }));
   void _appendLog(String entry) {
     setState(() {
       _eventLogs.insert(0, '${DateTime.now().toIso8601String()} $entry');
-      if (_eventLogs.length > 50) {
+      if (_eventLogs.length > 80) {
         _eventLogs.removeLast();
       }
     });
@@ -189,14 +230,197 @@ window.dispatchEvent(new CustomEvent('zenit:set-filters', { detail: {} }));
 
   @override
   void dispose() {
+    _webUrlController.dispose();
+    _baseUrlController.dispose();
+    _accessTokenController.dispose();
+    _sdkTokenController.dispose();
     _mapIdController.dispose();
     _promotorController.dispose();
     super.dispose();
   }
 }
 
+class ZenitRuntimeConfig {
+  ZenitRuntimeConfig({
+    required this.baseUrl,
+    required this.accessToken,
+    required this.sdkToken,
+    required this.mapId,
+    required this.defaultFilters,
+  });
+
+  final String baseUrl;
+  final String? accessToken;
+  final String? sdkToken;
+  final int? mapId;
+  final Map<String, dynamic> defaultFilters;
+
+  Map<String, dynamic> toJson() {
+    final payload = <String, dynamic>{
+      'baseUrl': baseUrl,
+      'defaultFilters': defaultFilters,
+    };
+    if (accessToken != null && accessToken!.isNotEmpty) {
+      payload['accessToken'] = accessToken;
+    }
+    if (sdkToken != null && sdkToken!.isNotEmpty) {
+      payload['sdkToken'] = sdkToken;
+    }
+    if (mapId != null) {
+      payload['mapId'] = mapId;
+    }
+    return payload;
+  }
+}
+
+class ZenitBridge {
+  ZenitBridge({required WebViewController controller})
+      : _controller = controller;
+
+  final WebViewController _controller;
+  bool _pageReady = false;
+  final List<Future<void> Function()> _pendingActions = [];
+
+  void onPageStarted() {
+    _pageReady = false;
+    _pendingActions.clear();
+  }
+
+  Future<void> onPageFinished() async {
+    _pageReady = true;
+    await _controller.runJavaScript(_bootstrapScript);
+    final pending = List<Future<void> Function()>.from(_pendingActions);
+    _pendingActions.clear();
+    for (final action in pending) {
+      await action();
+    }
+  }
+
+  Future<void> sendRuntimeConfig(ZenitRuntimeConfig config) async {
+    final payload = jsonEncode(config.toJson());
+    await _runWhenReady(() {
+      return _controller.runJavaScript('''
+(() => {
+  const cfg = $payload;
+  window.__ZENIT_RUNTIME_CONFIG__ = cfg;
+  window.dispatchEvent(new CustomEvent('zenit:runtime-config', { detail: cfg }));
+})();
+''');
+    });
+  }
+
+  Future<void> setFilters(Map<String, dynamic>? filters,
+      {bool merge = false}) async {
+    final payload = jsonEncode({'filters': filters, 'merge': merge});
+    await _runWhenReady(() {
+      return _controller.runJavaScript('''
+(() => {
+  const detail = $payload;
+  window.dispatchEvent(new CustomEvent('zenit:set-filters', { detail }));
+})();
+''');
+    });
+  }
+
+  Future<void> clearFilters() async {
+    await setFilters(null);
+  }
+
+  Future<bool> ping() async {
+    try {
+      final result = await _controller.runJavaScriptReturningResult(
+        'window.__ZENIT_NATIVE__ && window.__ZENIT_NATIVE__.__bridgeReady',
+      );
+      return result == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _runWhenReady(Future<void> Function() action) async {
+    if (_pageReady) {
+      await action();
+      return;
+    }
+    _pendingActions.add(action);
+  }
+
+  static const String _bootstrapScript = '''
+(() => {
+  if (window.__ZENIT_NATIVE__ && window.__ZENIT_NATIVE__.__bridgeReady) {
+    return;
+  }
+
+  const postMessage = (payload) => {
+    try {
+      if (window.ZenitNative && window.ZenitNative.postMessage) {
+        window.ZenitNative.postMessage(JSON.stringify(payload));
+      }
+    } catch (err) {
+      // noop
+    }
+  };
+
+  window.__ZENIT_NATIVE__ = {
+    __bridgeReady: true,
+    post: (type, payload) => postMessage({ type, payload }),
+  };
+
+  const levels = ['log', 'info', 'warn', 'error'];
+  levels.forEach((level) => {
+    const original = console[level];
+    console[level] = (...args) => {
+      try {
+        original.apply(console, args);
+      } finally {
+        postMessage({ type: 'console', level, args });
+      }
+    };
+  });
+
+  window.addEventListener('zenit:runtime-applied', (event) => {
+    postMessage({
+      type: 'event',
+      name: 'zenit:runtime-applied',
+      detail: event.detail ?? null,
+    });
+  });
+
+  window.addEventListener('zenit:filters-applied', (event) => {
+    postMessage({
+      type: 'event',
+      name: 'zenit:filters-applied',
+      detail: event.detail ?? null,
+    });
+  });
+
+  window.addEventListener('error', (event) => {
+    postMessage({
+      type: 'error',
+      message: event.message,
+      filename: event.filename,
+      lineno: event.lineno,
+      colno: event.colno,
+      stack: event.error && event.error.stack ? event.error.stack : null,
+    });
+  });
+
+  window.addEventListener('unhandledrejection', (event) => {
+    postMessage({
+      type: 'error',
+      message: event.reason ? event.reason.toString() : 'unhandledrejection',
+    });
+  });
+})();
+''';
+}
+
 class _ConfigPanel extends StatelessWidget {
   const _ConfigPanel({
+    required this.webUrlController,
+    required this.baseUrlController,
+    required this.accessTokenController,
+    required this.sdkTokenController,
     required this.mapIdController,
     required this.promotorController,
     required this.logs,
@@ -206,6 +430,10 @@ class _ConfigPanel extends StatelessWidget {
     required this.onReload,
   });
 
+  final TextEditingController webUrlController;
+  final TextEditingController baseUrlController;
+  final TextEditingController accessTokenController;
+  final TextEditingController sdkTokenController;
   final TextEditingController mapIdController;
   final TextEditingController promotorController;
   final List<String> logs;
@@ -213,6 +441,13 @@ class _ConfigPanel extends StatelessWidget {
   final VoidCallback onClearFilters;
   final VoidCallback onSendRuntimeConfig;
   final VoidCallback onReload;
+
+  String _buildUrlHint() {
+    if (!Platform.isAndroid) {
+      return 'En desktop/iOS usa el host normal.';
+    }
+    return 'Emulador Android: usa 10.0.2.2. Dispositivo físico: usa la IP LAN del host (ej. 192.168.x.x) y Vite con --host 0.0.0.0.';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -230,8 +465,42 @@ class _ConfigPanel extends StatelessWidget {
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
+            TextField(
+              controller: webUrlController,
+              decoration: const InputDecoration(
+                labelText: 'Web URL (Vite dev server)',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _buildUrlHint(),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: baseUrlController,
+              decoration: const InputDecoration(
+                labelText: 'Base URL (API)',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 8),
             Row(
               children: [
+                Expanded(
+                  child: TextField(
+                    controller: sdkTokenController,
+                    decoration: const InputDecoration(
+                      labelText: 'SDK Token',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
                     controller: mapIdController,
@@ -242,18 +511,27 @@ class _ConfigPanel extends StatelessWidget {
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: promotorController,
-                    decoration: const InputDecoration(
-                      labelText: 'Filtro PROMOTOR',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                  ),
-                ),
               ],
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: accessTokenController,
+              minLines: 2,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                labelText: 'Access Token',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: promotorController,
+              decoration: const InputDecoration(
+                labelText: 'Filtro PROMOTOR',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
             ),
             const SizedBox(height: 8),
             Wrap(
@@ -262,30 +540,30 @@ class _ConfigPanel extends StatelessWidget {
               children: [
                 FilledButton(
                   onPressed: onSendRuntimeConfig,
-                  child: const Text('Enviar config'),
+                  child: const Text('Aplicar Config'),
                 ),
                 FilledButton(
                   onPressed: onApplyFilters,
-                  child: const Text('Aplicar filtros'),
+                  child: const Text('Aplicar Filtro'),
                 ),
                 OutlinedButton(
                   onPressed: onClearFilters,
-                  child: const Text('Limpiar filtros'),
+                  child: const Text('Limpiar Filtros'),
                 ),
                 TextButton(
                   onPressed: onReload,
-                  child: const Text('Recargar web'),
+                  child: const Text('Recargar Web'),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             Text(
-              'Eventos recibidos',
+              'Logs',
               style: Theme.of(context).textTheme.titleSmall,
             ),
             const SizedBox(height: 6),
             Container(
-              constraints: const BoxConstraints(maxHeight: 160),
+              constraints: const BoxConstraints(maxHeight: 200),
               decoration: BoxDecoration(
                 border: Border.all(color: Colors.grey.shade300),
                 borderRadius: BorderRadius.circular(8),
@@ -295,7 +573,7 @@ class _ConfigPanel extends StatelessWidget {
                   ? const Center(
                       child: Padding(
                         padding: EdgeInsets.all(12),
-                        child: Text('Sin eventos aún.'),
+                        child: Text('Sin logs aún.'),
                       ),
                     )
                   : ListView.builder(
