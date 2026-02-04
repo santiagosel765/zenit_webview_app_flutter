@@ -88,7 +88,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
                 'desc=${err.description} url=${err.url} '
                 'isForMainFrame=${err.isForMainFrame}';
             debugPrint('WEBVIEW ERROR: $entry');
-            if (err.isForMainFrame) {
+            if (err.isForMainFrame == true) {
               _appendLog('WebView MAIN-FRAME error: $entry');
               setState(() => _hasError = true);
               return;
