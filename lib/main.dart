@@ -34,6 +34,9 @@ class _WebViewScreenState extends State<WebViewScreen> {
   late final ZenitBridge _bridge;
   int _progress = 0;
   bool _hasError = false;
+  bool _showSubresourceDebugOverlay = false;
+  bool _showSubresourceSnackBar = true;
+  String? _lastSubresourceError;
   // Emulador Android: usar 10.0.2.2 para llegar al localhost del host.
   // Dispositivo físico: usar la IP LAN del host (ej. 192.168.x.x) y Vite con --host 0.0.0.0.
   final TextEditingController _webUrlController = TextEditingController(
@@ -67,6 +70,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
             setState(() {
               _hasError = false;
               _progress = 0;
+              _lastSubresourceError = null;
             });
             _bridge.onPageStarted();
           },
@@ -74,15 +78,33 @@ class _WebViewScreenState extends State<WebViewScreen> {
             setState(() => _progress = 100);
             await _bridge.onPageFinished();
           },
+          onNavigationRequest: (request) {
+            debugPrint('WEBVIEW NAVIGATE: ${request.url}');
+            _appendLog('WebView navigate: ${request.url}');
+            return NavigationDecision.navigate;
+          },
           onWebResourceError: (err) {
-            debugPrint('WEBVIEW ERROR: code=${err.errorCode} '
-                'type=${err.errorType} desc=${err.description} '
-                'url=${err.url}');
-            _appendLog(
-              'WebView error: code=${err.errorCode} '
-              'type=${err.errorType} desc=${err.description} url=${err.url}',
-            );
-            setState(() => _hasError = true);
+            final entry = 'code=${err.errorCode} type=${err.errorType} '
+                'desc=${err.description} url=${err.url} '
+                'isForMainFrame=${err.isForMainFrame}';
+            debugPrint('WEBVIEW ERROR: $entry');
+            if (err.isForMainFrame) {
+              _appendLog('WebView MAIN-FRAME error: $entry');
+              setState(() => _hasError = true);
+              return;
+            }
+            _appendLog('WebView SUBRESOURCE error: $entry');
+            setState(() {
+              _lastSubresourceError = entry;
+            });
+            if (_showSubresourceSnackBar && mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Error cargando datos (API), reintentando...'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            }
           },
         ),
       );
@@ -99,6 +121,15 @@ class _WebViewScreenState extends State<WebViewScreen> {
       return;
     }
     await _controller.loadRequest(Uri.parse(url));
+  }
+
+  Future<void> _reloadWebView() async {
+    setState(() {
+      _hasError = false;
+      _progress = 0;
+      _lastSubresourceError = null;
+    });
+    await _loadWebUrl();
   }
 
   Future<bool> _onWillPop() async {
@@ -128,7 +159,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
                             const Text('No se pudo cargar la página'),
                             const SizedBox(height: 12),
                             FilledButton(
-                              onPressed: () => _controller.reload(),
+                              onPressed: _reloadWebView,
                               child: const Text('Reintentar'),
                             )
                           ],
@@ -138,6 +169,28 @@ class _WebViewScreenState extends State<WebViewScreen> {
                       WebViewWidget(controller: _controller),
                     if (_progress < 100 && !_hasError)
                       LinearProgressIndicator(value: _progress / 100),
+                    if (_showSubresourceDebugOverlay &&
+                        !_hasError &&
+                        _lastSubresourceError != null)
+                      Positioned(
+                        right: 12,
+                        bottom: 12,
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          constraints: const BoxConstraints(maxWidth: 260),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.7),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            _lastSubresourceError!,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -152,7 +205,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
                 onApplyFilters: _sendFilters,
                 onClearFilters: _clearFilters,
                 onSendRuntimeConfig: _sendRuntimeConfig,
-                onReload: _loadWebUrl,
+                onReload: _reloadWebView,
               ),
             ],
           ),
