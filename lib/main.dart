@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,8 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'config/zenit_build_config.dart';
 
 void main() => runApp(const MyApp());
+
+enum WebViewUiState { loading, ready, error }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -34,15 +37,14 @@ class _WebViewScreenState extends State<WebViewScreen> {
   late final WebViewController _controller;
   late final ZenitBridge _bridge;
 
-  int _progress = 0;
-  bool _hasError = false;
-
   final bool _showSubresourceDebugOverlay = ZenitBuildConfig.isDebug;
   final bool _showSubresourceSnackBar = ZenitBuildConfig.isDebug;
-  bool get _isDebug => ZenitBuildConfig.isDebug;
 
   String? _lastSubresourceError;
   final List<String> _eventLogs = [];
+  WebViewUiState _uiState = WebViewUiState.loading;
+  String? _uiErrorMessage;
+  Timer? _loadTimeoutTimer;
 
   @override
   void initState() {
@@ -58,20 +60,24 @@ class _WebViewScreenState extends State<WebViewScreen> {
         NavigationDelegate(
           onProgress: (progress) {
             if (!mounted) return;
-            setState(() => _progress = progress);
+            if (_uiState != WebViewUiState.loading) {
+              setState(() => _uiState = WebViewUiState.loading);
+            }
           },
           onPageStarted: (_) {
             if (!mounted) return;
             setState(() {
-              _hasError = false;
-              _progress = 0;
+              _uiState = WebViewUiState.loading;
+              _uiErrorMessage = null;
               _lastSubresourceError = null;
             });
+            _startLoadTimeout();
             _bridge.onPageStarted();
           },
           onPageFinished: (_) async {
             if (!mounted) return;
-            setState(() => _progress = 100);
+            _cancelLoadTimeout();
+            setState(() => _uiState = WebViewUiState.ready);
 
             await _bridge.onPageFinished();
             await _sendRuntimeConfig();
@@ -92,7 +98,12 @@ class _WebViewScreenState extends State<WebViewScreen> {
             if (err.isForMainFrame == true) {
               _appendLog('WebView MAIN-FRAME error: $entry');
               if (!mounted) return;
-              setState(() => _hasError = true);
+              _cancelLoadTimeout();
+              setState(() {
+                _uiState = WebViewUiState.error;
+                _uiErrorMessage =
+                    '($entry) No se pudo cargar el WebView principal.';
+              });
               return;
             }
 
@@ -132,11 +143,12 @@ class _WebViewScreenState extends State<WebViewScreen> {
   Future<void> _reloadWebView() async {
     if (!mounted) return;
     setState(() {
-      _hasError = false;
-      _progress = 0;
+      _uiState = WebViewUiState.loading;
+      _uiErrorMessage = null;
       _lastSubresourceError = null;
     });
-    await _loadWebUrl();
+    _startLoadTimeout();
+    await _controller.reload();
   }
 
   Future<bool> _onWillPop() async {
@@ -158,31 +170,10 @@ class _WebViewScreenState extends State<WebViewScreen> {
               Expanded(
                 child: Stack(
                   children: [
-                    // ✅ CORREGIDO: el if dentro del children con coma
-                    if (_hasError && _isDebug)
-                      Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text('No se pudo cargar la página'),
-                            const SizedBox(height: 12),
-                            FilledButton(
-                              onPressed: _reloadWebView,
-                              child: const Text('Reintentar'),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                    // Siempre mostramos el webview; si querés ocultarlo cuando hay error,
-                    // podés envolverlo con: if (!_hasError) WebViewWidget(...)
                     WebViewWidget(controller: _controller),
 
-                    if (_progress < 100 && !_hasError)
-                      LinearProgressIndicator(value: _progress / 100),
-
                     if (_showSubresourceDebugOverlay &&
-                        !_hasError &&
+                        _uiState != WebViewUiState.error &&
                         _lastSubresourceError != null)
                       Positioned(
                         right: 12,
@@ -203,10 +194,17 @@ class _WebViewScreenState extends State<WebViewScreen> {
                           ),
                         ),
                       ),
+                    if (_uiState == WebViewUiState.loading)
+                      const _WebViewLoadingOverlay(),
+                    if (_uiState == WebViewUiState.error)
+                      _WebViewErrorOverlay(
+                        message: _uiErrorMessage,
+                        onRetry: _reloadWebView,
+                      ),
                   ],
                 ),
               ),
-              if (_isDebug) _DebugLogs(logs: _eventLogs),
+              if (ZenitBuildConfig.showDevLogs) _DebugLogs(logs: _eventLogs),
             ],
           ),
         ),
@@ -269,13 +267,35 @@ class _WebViewScreenState extends State<WebViewScreen> {
   }
 
   void _appendLog(String entry) {
-    if (!_isDebug) return;
     if (!mounted) return;
 
     setState(() {
       _eventLogs.insert(0, '${DateTime.now().toIso8601String()} $entry');
       if (_eventLogs.length > 80) _eventLogs.removeLast();
     });
+  }
+
+  void _startLoadTimeout() {
+    _cancelLoadTimeout();
+    _loadTimeoutTimer = Timer(const Duration(seconds: 25), () {
+      if (!mounted) return;
+      if (_uiState == WebViewUiState.ready) return;
+      setState(() {
+        _uiState = WebViewUiState.error;
+        _uiErrorMessage = 'Tiempo de espera agotado cargando el WebView.';
+      });
+    });
+  }
+
+  void _cancelLoadTimeout() {
+    _loadTimeoutTimer?.cancel();
+    _loadTimeoutTimer = null;
+  }
+
+  @override
+  void dispose() {
+    _cancelLoadTimeout();
+    super.dispose();
   }
 }
 
@@ -487,6 +507,94 @@ class _DebugLogs extends StatelessWidget {
                     ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WebViewLoadingOverlay extends StatelessWidget {
+  const _WebViewLoadingOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black.withAlpha(80),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text(
+              'Cargando mapa…',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Esto puede tardar unos segundos',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WebViewErrorOverlay extends StatelessWidget {
+  const _WebViewErrorOverlay({
+    required this.message,
+    required this.onRetry,
+  });
+
+  final String? message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black.withAlpha(80),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 320),
+          child: Card(
+            margin: const EdgeInsets.all(24),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.error_outline,
+                    color: Colors.redAccent,
+                    size: 48,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'No se pudo cargar el mapa',
+                    style: Theme.of(context).textTheme.titleMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                  if (message != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      message!,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall,
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: onRetry,
+                    child: const Text('Reintentar'),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );

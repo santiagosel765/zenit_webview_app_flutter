@@ -23,4 +23,5 @@ class ZenitBuildConfig {
     'ZENIT_DEBUG',
     defaultValue: true,
   );
+  static const bool showDevLogs = false;
 }
