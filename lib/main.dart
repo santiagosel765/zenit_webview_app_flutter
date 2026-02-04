@@ -1,4 +1,5 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -32,13 +33,16 @@ class WebViewScreen extends StatefulWidget {
 class _WebViewScreenState extends State<WebViewScreen> {
   late final WebViewController _controller;
   late final ZenitBridge _bridge;
+
   int _progress = 0;
   bool _hasError = false;
+
   final bool _showSubresourceDebugOverlay = ZenitBuildConfig.isDebug;
   final bool _showSubresourceSnackBar = ZenitBuildConfig.isDebug;
+  bool get _isDebug => ZenitBuildConfig.isDebug;
+
   String? _lastSubresourceError;
   final List<String> _eventLogs = [];
-  bool get _isDebug => ZenitBuildConfig.isDebug;
 
   @override
   void initState() {
@@ -52,8 +56,12 @@ class _WebViewScreenState extends State<WebViewScreen> {
       )
       ..setNavigationDelegate(
         NavigationDelegate(
-          onProgress: (progress) => setState(() => _progress = progress),
+          onProgress: (progress) {
+            if (!mounted) return;
+            setState(() => _progress = progress);
+          },
           onPageStarted: (_) {
+            if (!mounted) return;
             setState(() {
               _hasError = false;
               _progress = 0;
@@ -62,7 +70,9 @@ class _WebViewScreenState extends State<WebViewScreen> {
             _bridge.onPageStarted();
           },
           onPageFinished: (_) async {
+            if (!mounted) return;
             setState(() => _progress = 100);
+
             await _bridge.onPageFinished();
             await _sendRuntimeConfig();
             await _sendFilters();
@@ -76,17 +86,24 @@ class _WebViewScreenState extends State<WebViewScreen> {
             final entry = 'code=${err.errorCode} type=${err.errorType} '
                 'desc=${err.description} url=${err.url} '
                 'isForMainFrame=${err.isForMainFrame}';
+
             debugPrint('WEBVIEW ERROR: $entry');
+
             if (err.isForMainFrame == true) {
               _appendLog('WebView MAIN-FRAME error: $entry');
+              if (!mounted) return;
               setState(() => _hasError = true);
               return;
             }
+
             _appendLog('WebView SUBRESOURCE error: $entry');
+
+            if (!mounted) return;
             setState(() {
               _lastSubresourceError = entry;
             });
-            if (_showSubresourceSnackBar && mounted) {
+
+            if (_showSubresourceSnackBar) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
                   content: Text('Error cargando datos (API), reintentando...'),
@@ -113,6 +130,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
   }
 
   Future<void> _reloadWebView() async {
+    if (!mounted) return;
     setState(() {
       _hasError = false;
       _progress = 0;
@@ -140,6 +158,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
               Expanded(
                 child: Stack(
                   children: [
+                    // ✅ CORREGIDO: el if dentro del children con coma
                     if (_hasError && _isDebug)
                       Center(
                         child: Column(
@@ -150,13 +169,18 @@ class _WebViewScreenState extends State<WebViewScreen> {
                             FilledButton(
                               onPressed: _reloadWebView,
                               child: const Text('Reintentar'),
-                            )
+                            ),
                           ],
                         ),
-                      )
+                      ),
+
+                    // Siempre mostramos el webview; si querés ocultarlo cuando hay error,
+                    // podés envolverlo con: if (!_hasError) WebViewWidget(...)
                     WebViewWidget(controller: _controller),
+
                     if (_progress < 100 && !_hasError)
                       LinearProgressIndicator(value: _progress / 100),
+
                     if (_showSubresourceDebugOverlay &&
                         !_hasError &&
                         _lastSubresourceError != null)
@@ -167,7 +191,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
                           padding: const EdgeInsets.all(8),
                           constraints: const BoxConstraints(maxWidth: 260),
                           decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.7),
+                            color: Colors.black.withAlpha(180),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
@@ -202,9 +226,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
 
   Map<String, dynamic> _buildFiltersPayload() {
     final promotor = ZenitBuildConfig.filterPromotor.trim();
-    if (promotor.isEmpty) {
-      return {};
-    }
+    if (promotor.isEmpty) return {};
     return {'PROMOTOR': promotor};
   }
 
@@ -222,20 +244,24 @@ class _WebViewScreenState extends State<WebViewScreen> {
     try {
       final decoded = jsonDecode(message) as Map<String, dynamic>;
       final type = decoded['type']?.toString() ?? 'unknown';
+
       if (type == 'console') {
         final level = decoded['level']?.toString() ?? 'log';
         _appendLog('console.$level ${decoded['args']}');
         return;
       }
+
       if (type == 'event') {
         final name = decoded['name']?.toString() ?? 'event';
         _appendLog('Web event: $name detail=${decoded['detail']}');
         return;
       }
+
       if (type == 'error') {
         _appendLog('Web error: ${decoded['message']}');
         return;
       }
+
       _appendLog('Web -> Flutter: $decoded');
     } catch (_) {
       _appendLog('Web -> Flutter (texto): $message');
@@ -243,14 +269,12 @@ class _WebViewScreenState extends State<WebViewScreen> {
   }
 
   void _appendLog(String entry) {
-    if (!_isDebug) {
-      return;
-    }
+    if (!_isDebug) return;
+    if (!mounted) return;
+
     setState(() {
       _eventLogs.insert(0, '${DateTime.now().toIso8601String()} $entry');
-      if (_eventLogs.length > 80) {
-        _eventLogs.removeLast();
-      }
+      if (_eventLogs.length > 80) _eventLogs.removeLast();
     });
   }
 }
@@ -265,32 +289,27 @@ class ZenitRuntimeConfig {
   });
 
   final String baseUrl;
-  final String? accessToken;
-  final String? sdkToken;
-  final int? mapId;
+  final String accessToken;
+  final String sdkToken;
+  final int mapId;
   final Map<String, dynamic> defaultFilters;
 
   Map<String, dynamic> toJson() {
     final payload = <String, dynamic>{
       'baseUrl': baseUrl,
       'defaultFilters': defaultFilters,
+      'mapId': mapId,
     };
-    if (accessToken != null && accessToken!.isNotEmpty) {
-      payload['accessToken'] = accessToken;
-    }
-    if (sdkToken != null && sdkToken!.isNotEmpty) {
-      payload['sdkToken'] = sdkToken;
-    }
-    if (mapId != null) {
-      payload['mapId'] = mapId;
-    }
+
+    if (accessToken.isNotEmpty) payload['accessToken'] = accessToken;
+    if (sdkToken.isNotEmpty) payload['sdkToken'] = sdkToken;
+
     return payload;
   }
 }
 
 class ZenitBridge {
-  ZenitBridge({required WebViewController controller})
-      : _controller = controller;
+  ZenitBridge({required WebViewController controller}) : _controller = controller;
 
   final WebViewController _controller;
   bool _pageReady = false;
@@ -304,8 +323,10 @@ class ZenitBridge {
   Future<void> onPageFinished() async {
     _pageReady = true;
     await _controller.runJavaScript(_bootstrapScript);
+
     final pending = List<Future<void> Function()>.from(_pendingActions);
     _pendingActions.clear();
+
     for (final action in pending) {
       await action();
     }
@@ -335,21 +356,6 @@ class ZenitBridge {
 })();
 ''');
     });
-  }
-
-  Future<void> clearFilters() async {
-    await setFilters(null);
-  }
-
-  Future<bool> ping() async {
-    try {
-      final result = await _controller.runJavaScriptReturningResult(
-        'window.__ZENIT_NATIVE__ && window.__ZENIT_NATIVE__.__bridgeReady',
-      );
-      return result == true;
-    } catch (_) {
-      return false;
-    }
   }
 
   Future<void> _runWhenReady(Future<void> Function() action) async {
