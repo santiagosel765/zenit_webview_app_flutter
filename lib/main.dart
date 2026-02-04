@@ -1,8 +1,8 @@
 import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+
+import 'config/zenit_build_config.dart';
 
 void main() => runApp(const MyApp());
 
@@ -34,24 +34,11 @@ class _WebViewScreenState extends State<WebViewScreen> {
   late final ZenitBridge _bridge;
   int _progress = 0;
   bool _hasError = false;
-  bool _showSubresourceDebugOverlay = false;
-  bool _showSubresourceSnackBar = true;
+  final bool _showSubresourceDebugOverlay = ZenitBuildConfig.isDebug;
+  final bool _showSubresourceSnackBar = ZenitBuildConfig.isDebug;
   String? _lastSubresourceError;
-  // Emulador Android: usar 10.0.2.2 para llegar al localhost del host.
-  // Dispositivo físico: usar la IP LAN del host (ej. 192.168.x.x) y Vite con --host 0.0.0.0.
-  final TextEditingController _webUrlController = TextEditingController(
-    text: 'http://10.0.2.2:5173/',
-  );
-  final TextEditingController _baseUrlController = TextEditingController(
-    text: 'http://10.0.2.2:3200/api/v1',
-  );
-  final TextEditingController _accessTokenController = TextEditingController();
-  final TextEditingController _sdkTokenController = TextEditingController();
-  final TextEditingController _mapIdController =
-      TextEditingController(text: '19');
-  final TextEditingController _promotorController =
-      TextEditingController(text: 'PROMOTOR DEMO');
   final List<String> _eventLogs = [];
+  bool get _isDebug => ZenitBuildConfig.isDebug;
 
   @override
   void initState() {
@@ -77,6 +64,8 @@ class _WebViewScreenState extends State<WebViewScreen> {
           onPageFinished: (_) async {
             setState(() => _progress = 100);
             await _bridge.onPageFinished();
+            await _sendRuntimeConfig();
+            await _sendFilters();
           },
           onNavigationRequest: (request) {
             debugPrint('WEBVIEW NAVIGATE: ${request.url}');
@@ -115,7 +104,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
   }
 
   Future<void> _loadWebUrl() async {
-    final url = _webUrlController.text.trim();
+    final url = ZenitBuildConfig.webUrl.trim();
     if (url.isEmpty) {
       _appendLog('WebView: URL vacía, no se puede cargar.');
       return;
@@ -151,7 +140,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
               Expanded(
                 child: Stack(
                   children: [
-                    if (_hasError)
+                    if (_hasError && _isDebug)
                       Center(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
@@ -165,8 +154,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
                           ],
                         ),
                       )
-                    else
-                      WebViewWidget(controller: _controller),
+                    WebViewWidget(controller: _controller),
                     if (_progress < 100 && !_hasError)
                       LinearProgressIndicator(value: _progress / 100),
                     if (_showSubresourceDebugOverlay &&
@@ -194,19 +182,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
                   ],
                 ),
               ),
-              _ConfigPanel(
-                webUrlController: _webUrlController,
-                baseUrlController: _baseUrlController,
-                accessTokenController: _accessTokenController,
-                sdkTokenController: _sdkTokenController,
-                mapIdController: _mapIdController,
-                promotorController: _promotorController,
-                logs: _eventLogs,
-                onApplyFilters: _sendFilters,
-                onClearFilters: _clearFilters,
-                onSendRuntimeConfig: _sendRuntimeConfig,
-                onReload: _reloadWebView,
-              ),
+              if (_isDebug) _DebugLogs(logs: _eventLogs),
             ],
           ),
         ),
@@ -215,18 +191,17 @@ class _WebViewScreenState extends State<WebViewScreen> {
   }
 
   ZenitRuntimeConfig _buildRuntimeConfig() {
-    final mapId = int.tryParse(_mapIdController.text.trim());
     return ZenitRuntimeConfig(
-      baseUrl: _baseUrlController.text.trim(),
-      accessToken: _accessTokenController.text.trim(),
-      sdkToken: _sdkTokenController.text.trim(),
-      mapId: mapId,
+      baseUrl: ZenitBuildConfig.baseUrl,
+      accessToken: ZenitBuildConfig.accessToken,
+      sdkToken: ZenitBuildConfig.sdkToken,
+      mapId: ZenitBuildConfig.mapId,
       defaultFilters: _buildFiltersPayload(),
     );
   }
 
   Map<String, dynamic> _buildFiltersPayload() {
-    final promotor = _promotorController.text.trim();
+    final promotor = ZenitBuildConfig.filterPromotor.trim();
     if (promotor.isEmpty) {
       return {};
     }
@@ -241,11 +216,6 @@ class _WebViewScreenState extends State<WebViewScreen> {
   Future<void> _sendFilters() async {
     await _bridge.setFilters(_buildFiltersPayload());
     _appendLog('Flutter -> Web: filtros enviados');
-  }
-
-  Future<void> _clearFilters() async {
-    await _bridge.clearFilters();
-    _appendLog('Flutter -> Web: filtros limpiados');
   }
 
   void _handleWebEvent(String message) {
@@ -273,23 +243,15 @@ class _WebViewScreenState extends State<WebViewScreen> {
   }
 
   void _appendLog(String entry) {
+    if (!_isDebug) {
+      return;
+    }
     setState(() {
       _eventLogs.insert(0, '${DateTime.now().toIso8601String()} $entry');
       if (_eventLogs.length > 80) {
         _eventLogs.removeLast();
       }
     });
-  }
-
-  @override
-  void dispose() {
-    _webUrlController.dispose();
-    _baseUrlController.dispose();
-    _accessTokenController.dispose();
-    _sdkTokenController.dispose();
-    _mapIdController.dispose();
-    _promotorController.dispose();
-    super.dispose();
   }
 }
 
@@ -468,39 +430,10 @@ class ZenitBridge {
 ''';
 }
 
-class _ConfigPanel extends StatelessWidget {
-  const _ConfigPanel({
-    required this.webUrlController,
-    required this.baseUrlController,
-    required this.accessTokenController,
-    required this.sdkTokenController,
-    required this.mapIdController,
-    required this.promotorController,
-    required this.logs,
-    required this.onApplyFilters,
-    required this.onClearFilters,
-    required this.onSendRuntimeConfig,
-    required this.onReload,
-  });
+class _DebugLogs extends StatelessWidget {
+  const _DebugLogs({required this.logs});
 
-  final TextEditingController webUrlController;
-  final TextEditingController baseUrlController;
-  final TextEditingController accessTokenController;
-  final TextEditingController sdkTokenController;
-  final TextEditingController mapIdController;
-  final TextEditingController promotorController;
   final List<String> logs;
-  final VoidCallback onApplyFilters;
-  final VoidCallback onClearFilters;
-  final VoidCallback onSendRuntimeConfig;
-  final VoidCallback onReload;
-
-  String _buildUrlHint() {
-    if (!Platform.isAndroid) {
-      return 'En desktop/iOS usa el host normal.';
-    }
-    return 'Emulador Android: usa 10.0.2.2. Dispositivo físico: usa la IP LAN del host (ej. 192.168.x.x) y Vite con --host 0.0.0.0.';
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -514,107 +447,10 @@ class _ConfigPanel extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'Panel de Configuración (DEV)',
+              'Logs (DEV)',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
-            TextField(
-              controller: webUrlController,
-              decoration: const InputDecoration(
-                labelText: 'Web URL (Vite dev server)',
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              _buildUrlHint(),
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: baseUrlController,
-              decoration: const InputDecoration(
-                labelText: 'Base URL (API)',
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: sdkTokenController,
-                    decoration: const InputDecoration(
-                      labelText: 'SDK Token',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: mapIdController,
-                    decoration: const InputDecoration(
-                      labelText: 'Map ID',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: accessTokenController,
-              minLines: 2,
-              maxLines: 4,
-              decoration: const InputDecoration(
-                labelText: 'Access Token',
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: promotorController,
-              decoration: const InputDecoration(
-                labelText: 'Filtro PROMOTOR',
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                FilledButton(
-                  onPressed: onSendRuntimeConfig,
-                  child: const Text('Aplicar Config'),
-                ),
-                FilledButton(
-                  onPressed: onApplyFilters,
-                  child: const Text('Aplicar Filtro'),
-                ),
-                OutlinedButton(
-                  onPressed: onClearFilters,
-                  child: const Text('Limpiar Filtros'),
-                ),
-                TextButton(
-                  onPressed: onReload,
-                  child: const Text('Recargar Web'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Logs',
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
-            const SizedBox(height: 6),
             Container(
               constraints: const BoxConstraints(maxHeight: 200),
               decoration: BoxDecoration(
