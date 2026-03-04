@@ -15,13 +15,12 @@ class ZenitBuildConfig {
     'ZENIT_FILTER_PROMOTOR',
     defaultValue: 'PROMOTOR DEMO',
   );
-  static const String? sdkToken =
+  static const String sdkToken =
       String.fromEnvironment('ZENIT_SDK_TOKEN', defaultValue: '');
-  static const String? accessToken =
+  static const String accessToken =
       String.fromEnvironment('ZENIT_ACCESS_TOKEN', defaultValue: '');
-  static const bool isDebug = bool.fromEnvironment(
-    'ZENIT_DEBUG',
+  static const bool showDevLogs = bool.fromEnvironment(
+    'ZENIT_SHOW_DEV_LOGS',
     defaultValue: true,
   );
-  static const bool showDevLogs = false;
 }

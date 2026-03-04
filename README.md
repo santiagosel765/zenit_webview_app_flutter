@@ -1,25 +1,59 @@
-# zenit_webview_app
+# zenit_webview_sdk
 
-A new Flutter project.
+Flutter SDK package to embed Zenit's web experience in a `WebView` while preserving the existing JavaScript bridge contract.
 
-## Web (web-react) configuración local
+## Installation
 
-Si estás usando un frontend web (por ejemplo `web-react`) con Vite dentro de un
-emulador Android, se recomienda apuntar el `VITE_ZENIT_BASE_URL` directamente
-al backend (por ejemplo `http://10.0.2.2:3200/api/v1`) en lugar de depender del
-proxy `/api`. Esto ayuda a evitar errores `ERR_CONTENT_LENGTH_MISMATCH` en el
-WebView. Si decides mantener el proxy, considera aumentar `timeout` y
-`proxyTimeout` y remover el header `content-length` en la respuesta del proxy.
+```bash
+flutter pub add zenit_webview_sdk
+```
 
-## Getting Started
+## Usage
 
-This project is a starting point for a Flutter application.
+```dart
+import 'package:flutter/material.dart';
+import 'package:zenit_webview_sdk/zenit_webview_sdk.dart';
 
-A few resources to get you started if this is your first Flutter project:
+class MapPage extends StatelessWidget {
+  const MapPage({super.key});
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+  @override
+  Widget build(BuildContext context) {
+    return ZenitWebViewSdk(
+      webUrl: Uri.parse('https://your-web-app.example.com/'),
+      runtimeConfig: ZenitRuntimeConfig(
+        baseUrl: 'https://api.example.com/v1',
+        mapId: 19,
+        defaultFilters: const {'PROMOTOR': 'PROMOTOR DEMO'},
+        accessToken: 'ACCESS_TOKEN',
+        sdkToken: 'SDK_TOKEN',
+      ),
+      enableLogs: true,
+      onWebEvent: (event) {
+        debugPrint('web event type=${event.type} name=${event.name}');
+      },
+    );
+  }
+}
+```
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Bridge contract (kept unchanged)
+
+- JS channel: `ZenitNative`
+- Events from Web: `zenit:runtime-applied`, `zenit:filters-applied`, `error`, `unhandledrejection`
+- Events from Flutter: `zenit:runtime-config`, `zenit:set-filters`
+
+## Example app
+
+A runnable host app is available in [`example/`](example/).
+
+Run it with:
+
+```bash
+cd example
+flutter pub get
+flutter run \
+  --dart-define=ZENIT_WEB_URL=http://10.0.2.2:5173/ \
+  --dart-define=ZENIT_BASE_URL=http://10.0.2.2:3200/api/v1 \
+  --dart-define=ZENIT_MAP_ID=19
+```
