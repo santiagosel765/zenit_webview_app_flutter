@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:zenit_webview_sdk/zenit_webview_sdk.dart';
 
@@ -10,13 +12,13 @@ class ExampleApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final promotor = ZenitBuildConfig.filterPromotor.trim();
+    final defaultFilters = _parseDefaultFilters(ZenitBuildConfig.defaultFiltersJson);
     final runtimeConfig = ZenitRuntimeConfig(
       baseUrl: ZenitBuildConfig.baseUrl,
       mapId: ZenitBuildConfig.mapId,
       accessToken: ZenitBuildConfig.accessToken,
       sdkToken: ZenitBuildConfig.sdkToken,
-      defaultFilters: promotor.isEmpty ? {} : {'PROMOTOR': promotor},
+      defaultFilters: defaultFilters,
     );
 
     return MaterialApp(
@@ -35,5 +37,25 @@ class ExampleApp extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Map<String, dynamic>? _parseDefaultFilters(String rawJson) {
+    final trimmed = rawJson.trim();
+    if (trimmed.isEmpty) return null;
+
+    try {
+      final decoded = jsonDecode(trimmed);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+
+      debugPrint(
+        'ZENIT_DEFAULT_FILTERS ignorado: el valor debe ser un JSON object.',
+      );
+      return null;
+    } catch (_) {
+      debugPrint('ZENIT_DEFAULT_FILTERS ignorado: JSON inválido.');
+      return null;
+    }
   }
 }

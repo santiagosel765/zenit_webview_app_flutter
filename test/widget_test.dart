@@ -17,4 +17,17 @@ void main() {
       'defaultFilters': const {'PROMOTOR': 'DEMO'},
     });
   });
+
+  test('ZenitRuntimeConfig.toJson omits defaultFilters when null', () {
+    final config = ZenitRuntimeConfig(
+      baseUrl: 'https://api.example.com/v1',
+      mapId: 19,
+      defaultFilters: null,
+    );
+
+    expect(config.toJson(), {
+      'baseUrl': 'https://api.example.com/v1',
+      'mapId': 19,
+    });
+  });
 }
