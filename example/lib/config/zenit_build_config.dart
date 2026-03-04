@@ -11,9 +11,9 @@ class ZenitBuildConfig {
     'ZENIT_MAP_ID',
     defaultValue: 19,
   );
-  static const String filterPromotor = String.fromEnvironment(
-    'ZENIT_FILTER_PROMOTOR',
-    defaultValue: 'PROMOTOR DEMO',
+  static const String defaultFiltersJson = String.fromEnvironment(
+    'ZENIT_DEFAULT_FILTERS',
+    defaultValue: '',
   );
   static const String sdkToken =
       String.fromEnvironment('ZENIT_SDK_TOKEN', defaultValue: '');

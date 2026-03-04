@@ -55,5 +55,6 @@ flutter pub get
 flutter run \
   --dart-define=ZENIT_WEB_URL=http://10.0.2.2:5173/ \
   --dart-define=ZENIT_BASE_URL=http://10.0.2.2:3200/api/v1 \
-  --dart-define=ZENIT_MAP_ID=19
+  --dart-define=ZENIT_MAP_ID=19 \
+  --dart-define='ZENIT_DEFAULT_FILTERS={"PROMOTOR":"JHONY EDUARDO CHOC TOT"}'
 ```

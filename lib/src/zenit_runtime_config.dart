@@ -2,21 +2,21 @@ class ZenitRuntimeConfig {
   ZenitRuntimeConfig({
     required this.baseUrl,
     required this.mapId,
-    required this.defaultFilters,
+    this.defaultFilters,
     this.accessToken,
     this.sdkToken,
   });
 
   final String baseUrl;
   final int mapId;
-  final Map<String, dynamic> defaultFilters;
+  final Map<String, dynamic>? defaultFilters;
   final String? accessToken;
   final String? sdkToken;
 
   Map<String, dynamic> toJson() {
     final payload = <String, dynamic>{
       'baseUrl': baseUrl,
-      'defaultFilters': defaultFilters,
+      if (defaultFilters != null) 'defaultFilters': defaultFilters,
       'mapId': mapId,
     };
 

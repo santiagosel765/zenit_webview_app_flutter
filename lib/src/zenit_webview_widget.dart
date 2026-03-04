@@ -218,6 +218,13 @@ class _ZenitWebViewSdkState extends State<ZenitWebViewSdk> {
 
   Future<void> _sendRuntimeConfig() async {
     await _bridge.sendRuntimeConfig(widget.runtimeConfig);
+
+    final defaultFilters = widget.runtimeConfig.defaultFilters;
+    if (defaultFilters != null && defaultFilters.isNotEmpty) {
+      _appendLog('Flutter -> Web: runtime-config enviado con defaultFilters=$defaultFilters');
+      return;
+    }
+
     _appendLog('Flutter -> Web: runtime-config enviado');
   }
 
