@@ -51,10 +51,12 @@ Run it with:
 
 ```bash
 cd example
-flutter pub get
-flutter run \
-  --dart-define=ZENIT_WEB_URL=http://10.0.2.2:5173/ \
-  --dart-define=ZENIT_BASE_URL=http://10.0.2.2:3200/api/v1 \
-  --dart-define=ZENIT_MAP_ID=19 \
-  --dart-define='ZENIT_DEFAULT_FILTERS={"PROMOTOR":"JHONY EDUARDO CHOC TOT"}'
+
+Run Example (Local)
+
+flutter run -d RFCY401X1RR --dart-define=ZENIT_WEB_URL=http://10.0.2.2:5173/ --dart-define=ZENIT_BASE_URL=http://10.0.2.2:3200/api/v1 --dart-define=ZENIT_MAP_ID=19
+
+Run Example (Production)
+
+flutter run -d RFCY401X1RR --dart-define=ZENIT_WEB_URL=https://innova.genesisempresarial.com/zenit-playground/ --dart-define=ZENIT_BASE_URL=https://innova.genesisempresarial.com/zenit-api --dart-define=ZENIT_MAP_ID=19
 ```
