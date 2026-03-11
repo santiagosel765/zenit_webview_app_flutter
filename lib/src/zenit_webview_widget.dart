@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import 'zenit_bridge.dart';
@@ -59,7 +61,10 @@ class _ZenitWebViewSdkState extends State<ZenitWebViewSdk> {
   void initState() {
     super.initState();
 
-    _controller = WebViewController()
+    final PlatformWebViewControllerCreationParams params =
+        const PlatformWebViewControllerCreationParams();
+
+    _controller = WebViewController.fromPlatformCreationParams(params)
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..addJavaScriptChannel(
         ZenitBridge.jsChannelName,
@@ -134,7 +139,23 @@ class _ZenitWebViewSdkState extends State<ZenitWebViewSdk> {
 
     _bridge = ZenitBridge(controller: _controller);
     widget.onWebViewCreated?.call(_controller);
-    _loadWebUrl();
+    unawaited(_configureControllerAndLoad());
+  }
+
+  Future<void> _configureControllerAndLoad() async {
+    if (Platform.isAndroid) {
+      AndroidWebViewController.enableDebugging(true);
+
+      final platformController = _controller.platform;
+      if (platformController is AndroidWebViewController) {
+        await platformController.setMediaPlaybackRequiresUserGesture(false);
+      }
+
+      await _controller.clearCache();
+      await _controller.clearLocalStorage();
+    }
+
+    await _loadWebUrl();
   }
 
   Future<void> _loadWebUrl() async {
