@@ -1,16 +1,19 @@
 # zenit_webview_sdk_example
 
-A new Flutter project.
+Example app for `zenit_webview_sdk`.
 
-## Getting Started
+## Run with environment key (recommended)
 
-This project is a starting point for a Flutter application.
+```bash
+flutter run -d <device> --dart-define=ZENIT_ENVIRONMENT_KEY=PROD_IT_01
+```
 
-A few resources to get you started if this is your first Flutter project:
+## Optional legacy overrides (migration only)
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+flutter run -d <device> \
+  --dart-define=ZENIT_ENVIRONMENT_KEY=DEV_INNOVA_01 \
+  --dart-define=ZENIT_WEB_URL=http://10.0.2.2:5173/ \
+  --dart-define=ZENIT_BASE_URL=http://10.0.2.2:3200/api/v1 \
+  --dart-define=ZENIT_MAP_ID=19
+```

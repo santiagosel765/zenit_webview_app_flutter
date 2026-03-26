@@ -1,18 +1,23 @@
 class ZenitBuildConfig {
+  static const String environmentKey = String.fromEnvironment(
+    'ZENIT_ENVIRONMENT_KEY',
+    defaultValue: 'DEV_INNOVA_01',
+  );
 
-  static const String webUrl = String.fromEnvironment(
+  // Legacy overrides for local troubleshooting.
+  static const String webUrlOverride = String.fromEnvironment(
     'ZENIT_WEB_URL',
-    defaultValue: 'http://10.0.2.2:5173/',
+    defaultValue: '',
   );
 
-  static const String baseUrl = String.fromEnvironment(
+  static const String baseUrlOverride = String.fromEnvironment(
     'ZENIT_BASE_URL',
-    defaultValue: 'http://10.0.2.2:3200/api/v1',
+    defaultValue: '',
   );
 
-  static const int mapId = int.fromEnvironment(
+  static const int mapIdOverride = int.fromEnvironment(
     'ZENIT_MAP_ID',
-    defaultValue: 19,
+    defaultValue: -1,
   );
 
   static const String defaultFiltersJson = String.fromEnvironment(
