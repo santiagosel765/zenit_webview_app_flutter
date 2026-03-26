@@ -4,7 +4,6 @@ class ZenitBuildConfig {
     defaultValue: 'DEV_INNOVA_01',
   );
 
-  // Legacy overrides for local troubleshooting.
   static const String webUrlOverride = String.fromEnvironment(
     'ZENIT_WEB_URL',
     defaultValue: '',
@@ -25,14 +24,18 @@ class ZenitBuildConfig {
     defaultValue: '',
   );
 
-  static const String sdkToken =
-      String.fromEnvironment('ZENIT_SDK_TOKEN', defaultValue: '');
+  static const String sdkToken = String.fromEnvironment(
+    'ZENIT_SDK_TOKEN',
+    defaultValue: '',
+  );
 
-  static const String accessToken =
-      String.fromEnvironment('ZENIT_ACCESS_TOKEN', defaultValue: '');
+  static const String accessToken = String.fromEnvironment(
+    'ZENIT_ACCESS_TOKEN',
+    defaultValue: '',
+  );
 
   static const bool showDevLogs = bool.fromEnvironment(
     'ZENIT_SHOW_DEV_LOGS',
-    defaultValue: true,
+    defaultValue: false,
   );
 }

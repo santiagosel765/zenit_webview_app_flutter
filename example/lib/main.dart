@@ -12,29 +12,11 @@ class ExampleApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final defaultFilters = _parseDefaultFilters(ZenitBuildConfig.defaultFiltersJson);
+    final effectiveConfig = _resolveEffectiveConfig();
 
-    final hasLegacyOverrides =
-        ZenitBuildConfig.webUrlOverride.trim().isNotEmpty &&
-        ZenitBuildConfig.baseUrlOverride.trim().isNotEmpty &&
-        ZenitBuildConfig.mapIdOverride > 0;
-
-    final sdkWidget = hasLegacyOverrides
-        ? ZenitWebViewSdk(
-            webUrl: Uri.parse(ZenitBuildConfig.webUrlOverride),
-            runtimeConfig: ZenitRuntimeConfig(
-              baseUrl: ZenitBuildConfig.baseUrlOverride,
-              mapId: ZenitBuildConfig.mapIdOverride,
-              accessToken: ZenitBuildConfig.accessToken,
-              sdkToken: ZenitBuildConfig.sdkToken,
-              defaultFilters: defaultFilters,
-            ),
-            enableLogs: ZenitBuildConfig.showDevLogs,
-          )
-        : ZenitWebViewSdk(
-            environmentKey: ZenitBuildConfig.environmentKey,
-            enableLogs: ZenitBuildConfig.showDevLogs,
-          );
+    if (effectiveConfig.effectiveShowDevLogs) {
+      _debugLogEffectiveConfig(effectiveConfig);
+    }
 
     return MaterialApp(
       title: 'Zenit SDK Playground',
@@ -44,13 +26,80 @@ class ExampleApp extends StatelessWidget {
       ),
       home: Scaffold(
         body: SafeArea(
-          child: sdkWidget,
+          child: ZenitWebViewSdk(
+            webUrl: effectiveConfig.effectiveWebUrl,
+            runtimeConfig: ZenitRuntimeConfig(
+              baseUrl: effectiveConfig.effectiveBaseUrl,
+              mapId: effectiveConfig.effectiveMapId,
+              defaultFilters: effectiveConfig.effectiveDefaultFilters,
+              accessToken: effectiveConfig.effectiveAccessToken,
+              sdkToken: effectiveConfig.effectiveSdkToken,
+            ),
+            enableLogs: effectiveConfig.effectiveShowDevLogs,
+          ),
         ),
       ),
     );
   }
 
-  Map<String, dynamic>? _parseDefaultFilters(String rawJson) {
+  _EffectiveConfig _resolveEffectiveConfig() {
+    final environmentKey = ZenitBuildConfig.environmentKey.trim();
+    final resolvedEnvironment = zenitEnvironments[environmentKey];
+
+    if (resolvedEnvironment == null) {
+      final availableKeys = zenitEnvironments.keys.join(', ');
+      throw ArgumentError.value(
+        environmentKey,
+        'ZENIT_ENVIRONMENT_KEY',
+        'No existe en el registry. Valores válidos: $availableKeys',
+      );
+    }
+
+    final webUrlOverride = ZenitBuildConfig.webUrlOverride.trim();
+    final baseUrlOverride = ZenitBuildConfig.baseUrlOverride.trim();
+    final sdkTokenOverride = ZenitBuildConfig.sdkToken.trim();
+    final accessTokenOverride = ZenitBuildConfig.accessToken.trim();
+
+    final parsedFiltersOverride = _parseDefaultFilters(
+      ZenitBuildConfig.defaultFiltersJson,
+      debugEnabled: ZenitBuildConfig.showDevLogs || resolvedEnvironment.showDevLogs == true,
+    );
+
+    final effectiveWebUrl =
+        webUrlOverride.isNotEmpty ? Uri.parse(webUrlOverride) : resolvedEnvironment.parsedWebUrl;
+
+    final effectiveBaseUrl =
+        baseUrlOverride.isNotEmpty ? baseUrlOverride : resolvedEnvironment.baseUrl;
+
+    final effectiveMapId =
+        ZenitBuildConfig.mapIdOverride > 0 ? ZenitBuildConfig.mapIdOverride : resolvedEnvironment.mapId;
+
+    final effectiveDefaultFilters = parsedFiltersOverride ?? resolvedEnvironment.defaultFilters;
+
+    final effectiveSdkToken =
+        sdkTokenOverride.isNotEmpty ? sdkTokenOverride : resolvedEnvironment.sdkToken;
+
+    final effectiveAccessToken =
+        accessTokenOverride.isNotEmpty ? accessTokenOverride : resolvedEnvironment.accessToken;
+
+    final effectiveShowDevLogs = ZenitBuildConfig.showDevLogs || resolvedEnvironment.showDevLogs == true;
+
+    return _EffectiveConfig(
+      environmentKey: environmentKey,
+      effectiveWebUrl: effectiveWebUrl,
+      effectiveBaseUrl: effectiveBaseUrl,
+      effectiveMapId: effectiveMapId,
+      effectiveDefaultFilters: effectiveDefaultFilters,
+      effectiveSdkToken: effectiveSdkToken,
+      effectiveAccessToken: effectiveAccessToken,
+      effectiveShowDevLogs: effectiveShowDevLogs,
+    );
+  }
+
+  Map<String, dynamic>? _parseDefaultFilters(
+    String rawJson, {
+    required bool debugEnabled,
+  }) {
     final trimmed = rawJson.trim();
     if (trimmed.isEmpty) return null;
 
@@ -60,13 +109,50 @@ class ExampleApp extends StatelessWidget {
         return decoded;
       }
 
-      debugPrint(
-        'ZENIT_DEFAULT_FILTERS ignorado: el valor debe ser un JSON object.',
-      );
+      if (debugEnabled) {
+        debugPrint(
+          'ZENIT_DEFAULT_FILTERS ignorado: el valor debe ser un JSON object.',
+        );
+      }
       return null;
     } catch (_) {
-      debugPrint('ZENIT_DEFAULT_FILTERS ignorado: JSON inválido.');
+      if (debugEnabled) {
+        debugPrint('ZENIT_DEFAULT_FILTERS ignorado: JSON inválido.');
+      }
       return null;
     }
   }
+
+  void _debugLogEffectiveConfig(_EffectiveConfig config) {
+    debugPrint('Zenit effective config (${config.environmentKey}):');
+    debugPrint('  webUrl=${config.effectiveWebUrl}');
+    debugPrint('  baseUrl=${config.effectiveBaseUrl}');
+    debugPrint('  mapId=${config.effectiveMapId}');
+    debugPrint('  defaultFilters=${config.effectiveDefaultFilters}');
+    debugPrint('  sdkTokenSet=${(config.effectiveSdkToken ?? '').isNotEmpty}');
+    debugPrint('  accessTokenSet=${(config.effectiveAccessToken ?? '').isNotEmpty}');
+    debugPrint('  showDevLogs=${config.effectiveShowDevLogs}');
+  }
+}
+
+class _EffectiveConfig {
+  const _EffectiveConfig({
+    required this.environmentKey,
+    required this.effectiveWebUrl,
+    required this.effectiveBaseUrl,
+    required this.effectiveMapId,
+    required this.effectiveDefaultFilters,
+    required this.effectiveSdkToken,
+    required this.effectiveAccessToken,
+    required this.effectiveShowDevLogs,
+  });
+
+  final String environmentKey;
+  final Uri effectiveWebUrl;
+  final String effectiveBaseUrl;
+  final int effectiveMapId;
+  final Map<String, dynamic>? effectiveDefaultFilters;
+  final String? effectiveSdkToken;
+  final String? effectiveAccessToken;
+  final bool effectiveShowDevLogs;
 }
