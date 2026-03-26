@@ -7,6 +7,8 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import 'zenit_bridge.dart';
+import 'zenit_environment_registry.dart';
+import 'zenit_resolved_environment_config.dart';
 import 'zenit_callbacks.dart';
 import 'zenit_log_event.dart';
 import 'zenit_runtime_config.dart';
@@ -14,10 +16,14 @@ import 'zenit_ui_state.dart';
 
 class ZenitWebViewSdk extends StatefulWidget {
   const ZenitWebViewSdk({
-    required this.webUrl,
-    required this.runtimeConfig,
+    this.environmentKey,
+    @Deprecated(
+      'Legacy mode only. Prefer environmentKey so the SDK resolves URLs internally.',
+    )
+    this.webUrl,
+    this.runtimeConfig,
     super.key,
-    this.enableLogs = false,
+    this.enableLogs,
     this.loadTimeout = const Duration(seconds: 25),
     this.showDefaultLoading = true,
     this.showDefaultError = true,
@@ -29,9 +35,13 @@ class ZenitWebViewSdk extends StatefulWidget {
     this.onWebViewCreated,
   });
 
-  final Uri webUrl;
-  final ZenitRuntimeConfig runtimeConfig;
-  final bool enableLogs;
+  final String? environmentKey;
+  @Deprecated(
+    'Legacy mode only. Prefer environmentKey so the SDK resolves URLs internally.',
+  )
+  final Uri? webUrl;
+  final ZenitRuntimeConfig? runtimeConfig;
+  final bool? enableLogs;
   final Duration loadTimeout;
   final bool showDefaultLoading;
   final bool showDefaultError;
@@ -41,6 +51,49 @@ class ZenitWebViewSdk extends StatefulWidget {
   final void Function(ZenitWebEvent event)? onWebEvent;
   final void Function(WebResourceError error)? onWebResourceError;
   final void Function(WebViewController controller)? onWebViewCreated;
+
+
+  ZenitResolvedEnvironmentConfig? get _resolvedEnvironment {
+    final key = environmentKey;
+    if (key == null || key.trim().isEmpty) return null;
+
+    final resolved = resolveZenitEnvironment(key);
+    if (resolved == null) {
+      throw ArgumentError.value(
+        key,
+        'environmentKey',
+        'No existe una configuración registrada para este environmentKey.',
+      );
+    }
+    return resolved;
+  }
+
+  Uri get effectiveWebUrl {
+    final resolved = _resolvedEnvironment;
+    if (resolved != null) return resolved.parsedWebUrl;
+
+    if (webUrl != null) return webUrl!;
+
+    throw ArgumentError(
+      'Debes enviar environmentKey o webUrl (legacy) para inicializar ZenitWebViewSdk.',
+    );
+  }
+
+  ZenitRuntimeConfig get effectiveRuntimeConfig {
+    final resolved = _resolvedEnvironment;
+    if (resolved != null) return resolved.toRuntimeConfig();
+
+    if (runtimeConfig != null) return runtimeConfig!;
+
+    throw ArgumentError(
+      'Debes enviar environmentKey o runtimeConfig (legacy) para inicializar ZenitWebViewSdk.',
+    );
+  }
+
+  bool get effectiveEnableLogs {
+    final resolved = _resolvedEnvironment;
+    return enableLogs ?? resolved?.showDevLogs ?? false;
+  }
 
   @override
   State<ZenitWebViewSdk> createState() => _ZenitWebViewSdkState();
@@ -125,7 +178,7 @@ class _ZenitWebViewSdkState extends State<ZenitWebViewSdk> {
               _lastSubresourceError = entry;
             });
 
-            if (widget.enableLogs) {
+            if (widget.effectiveEnableLogs) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
                   content: Text('Error cargando datos (API), reintentando...'),
@@ -159,7 +212,7 @@ class _ZenitWebViewSdkState extends State<ZenitWebViewSdk> {
   }
 
   Future<void> _loadWebUrl() async {
-    await _controller.loadRequest(widget.webUrl);
+    await _controller.loadRequest(widget.effectiveWebUrl);
   }
 
   Future<void> _reloadWebView() async {
@@ -191,7 +244,7 @@ class _ZenitWebViewSdkState extends State<ZenitWebViewSdk> {
             child: Stack(
               children: [
                 WebViewWidget(controller: _controller),
-                if (widget.enableLogs && _uiState != ZenitUiState.error && _lastSubresourceError != null)
+                if (widget.effectiveEnableLogs && _uiState != ZenitUiState.error && _lastSubresourceError != null)
                   Positioned(
                     right: 12,
                     bottom: 12,
@@ -215,7 +268,7 @@ class _ZenitWebViewSdkState extends State<ZenitWebViewSdk> {
               ],
             ),
           ),
-          if (widget.enableLogs) _DebugLogs(logs: _eventLogs),
+          if (widget.effectiveEnableLogs) _DebugLogs(logs: _eventLogs),
         ],
       ),
     );
@@ -238,9 +291,9 @@ class _ZenitWebViewSdkState extends State<ZenitWebViewSdk> {
   }
 
   Future<void> _sendRuntimeConfig() async {
-    await _bridge.sendRuntimeConfig(widget.runtimeConfig);
+    await _bridge.sendRuntimeConfig(widget.effectiveRuntimeConfig);
 
-    final defaultFilters = widget.runtimeConfig.defaultFilters;
+    final defaultFilters = widget.effectiveRuntimeConfig.defaultFilters;
     if (defaultFilters != null && defaultFilters.isNotEmpty) {
       _appendLog('Flutter -> Web: runtime-config enviado con defaultFilters=$defaultFilters');
       return;
@@ -250,7 +303,7 @@ class _ZenitWebViewSdkState extends State<ZenitWebViewSdk> {
   }
 
   Future<void> _sendFilters() async {
-    await _bridge.setFilters(widget.runtimeConfig.defaultFilters);
+    await _bridge.setFilters(widget.effectiveRuntimeConfig.defaultFilters);
     _appendLog('Flutter -> Web: filtros enviados');
   }
 

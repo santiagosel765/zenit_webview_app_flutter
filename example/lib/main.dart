@@ -13,13 +13,28 @@ class ExampleApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final defaultFilters = _parseDefaultFilters(ZenitBuildConfig.defaultFiltersJson);
-    final runtimeConfig = ZenitRuntimeConfig(
-      baseUrl: ZenitBuildConfig.baseUrl,
-      mapId: ZenitBuildConfig.mapId,
-      accessToken: ZenitBuildConfig.accessToken,
-      sdkToken: ZenitBuildConfig.sdkToken,
-      defaultFilters: defaultFilters,
-    );
+
+    final hasLegacyOverrides =
+        ZenitBuildConfig.webUrlOverride.trim().isNotEmpty &&
+        ZenitBuildConfig.baseUrlOverride.trim().isNotEmpty &&
+        ZenitBuildConfig.mapIdOverride > 0;
+
+    final sdkWidget = hasLegacyOverrides
+        ? ZenitWebViewSdk(
+            webUrl: Uri.parse(ZenitBuildConfig.webUrlOverride),
+            runtimeConfig: ZenitRuntimeConfig(
+              baseUrl: ZenitBuildConfig.baseUrlOverride,
+              mapId: ZenitBuildConfig.mapIdOverride,
+              accessToken: ZenitBuildConfig.accessToken,
+              sdkToken: ZenitBuildConfig.sdkToken,
+              defaultFilters: defaultFilters,
+            ),
+            enableLogs: ZenitBuildConfig.showDevLogs,
+          )
+        : ZenitWebViewSdk(
+            environmentKey: ZenitBuildConfig.environmentKey,
+            enableLogs: ZenitBuildConfig.showDevLogs,
+          );
 
     return MaterialApp(
       title: 'Zenit SDK Playground',
@@ -29,11 +44,7 @@ class ExampleApp extends StatelessWidget {
       ),
       home: Scaffold(
         body: SafeArea(
-          child: ZenitWebViewSdk(
-            webUrl: Uri.parse(ZenitBuildConfig.webUrl),
-            runtimeConfig: runtimeConfig,
-            enableLogs: ZenitBuildConfig.showDevLogs,
-          ),
+          child: sdkWidget,
         ),
       ),
     );
