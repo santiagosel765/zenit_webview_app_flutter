@@ -39,7 +39,7 @@ The package includes a centralized registry with the supported keys:
 - `QA_IT_01`
 - `PROD_IT_01`
 
-You can also inspect `zenitEnvironments` if needed.
+You can inspect `zenitEnvironments` if needed.
 
 ## Legacy mode (transitional)
 
@@ -67,19 +67,29 @@ If `environmentKey` is provided, it has priority and legacy parameters are ignor
 
 A runnable host app is available in [`example/`](example/).
 
-Run it with:
+Run it with environment only:
 
 ```bash
 cd example
 flutter run -d <device> --dart-define=ZENIT_ENVIRONMENT_KEY=PROD_IT_01
 ```
 
-Optional legacy overrides for local debugging are still available:
+Run it with optional overrides (priority over registry values):
 
 ```bash
 flutter run -d <device> \
-  --dart-define=ZENIT_ENVIRONMENT_KEY=DEV_INNOVA_01 \
-  --dart-define=ZENIT_WEB_URL=http://10.0.2.2:5173/ \
-  --dart-define=ZENIT_BASE_URL=http://10.0.2.2:3200/api/v1 \
-  --dart-define=ZENIT_MAP_ID=19
+  --dart-define=ZENIT_ENVIRONMENT_KEY=PROD_IT_01 \
+  --dart-define=ZENIT_MAP_ID=19 \
+  --dart-define=ZENIT_DEFAULT_FILTERS={"PROMOTOR":"LUIS ALFREDO CABRERA CAMAJÁ"} \
+  --dart-define=ZENIT_SHOW_DEV_LOGS=true
 ```
+
+Supported example overrides:
+
+- `ZENIT_WEB_URL`
+- `ZENIT_BASE_URL`
+- `ZENIT_MAP_ID`
+- `ZENIT_DEFAULT_FILTERS`
+- `ZENIT_SDK_TOKEN`
+- `ZENIT_ACCESS_TOKEN`
+- `ZENIT_SHOW_DEV_LOGS`
