@@ -38,4 +38,9 @@ class ZenitBuildConfig {
     'ZENIT_SHOW_DEV_LOGS',
     defaultValue: false,
   );
+
+  static const bool enableLocalFiltersFallback = bool.fromEnvironment(
+    'ZENIT_ENABLE_LOCAL_FILTERS_FALLBACK',
+    defaultValue: false,
+  );
 }
