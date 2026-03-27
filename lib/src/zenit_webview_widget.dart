@@ -145,10 +145,10 @@ class _ZenitWebViewSdkState extends State<ZenitWebViewSdk> {
             if (!mounted) return;
             _cancelLoadTimeout();
             setState(() => _uiState = ZenitUiState.ready);
+            _appendLog('WebView: page finished');
 
             await _bridge.onPageFinished();
-            await _sendRuntimeConfig();
-            await _sendFilters();
+            await _dispatchConfigFlow(trigger: 'onPageFinished');
           },
           onNavigationRequest: (request) {
             _appendLog('WebView navigate: ${request.url}');
@@ -290,26 +290,95 @@ class _ZenitWebViewSdkState extends State<ZenitWebViewSdk> {
     );
   }
 
-  Future<void> _sendRuntimeConfig() async {
-    await _bridge.sendRuntimeConfig(widget.effectiveRuntimeConfig);
+  @override
+  void didUpdateWidget(covariant ZenitWebViewSdk oldWidget) {
+    super.didUpdateWidget(oldWidget);
 
-    final defaultFilters = widget.effectiveRuntimeConfig.defaultFilters;
-    if (defaultFilters != null && defaultFilters.isNotEmpty) {
-      _appendLog('Flutter -> Web: runtime-config enviado con defaultFilters=$defaultFilters');
+    final oldSignature = oldWidget.effectiveRuntimeConfig.signature(
+      environmentKey: oldWidget.environmentKey,
+    );
+    final newSignature = widget.effectiveRuntimeConfig.signature(
+      environmentKey: widget.environmentKey,
+    );
+
+    if (oldSignature == newSignature) return;
+
+    _appendLog('Detectado cambio de runtime-config. Reinyectando configuración.');
+    unawaited(_dispatchConfigFlow(trigger: 'didUpdateWidget'));
+  }
+
+  Future<void> _dispatchConfigFlow({required String trigger}) async {
+    final runtimeConfig = widget.effectiveRuntimeConfig;
+    final runtimeSignature = runtimeConfig.signature(environmentKey: widget.environmentKey);
+
+    final readyFromWeb = await _bridge.waitForWebReady();
+    if (readyFromWeb) {
+      _appendLog('Handshake web-ready confirmado. trigger=$trigger');
+    } else {
+      _appendLog(
+        'Handshake web-ready sin ACK explícito. Se aplica fallback controlado. trigger=$trigger',
+      );
+    }
+
+    final runtimeResult = _bridge.sendRuntimeConfig(
+      runtimeConfig,
+      signature: runtimeSignature,
+    );
+
+    if (runtimeResult.skipped) {
+      _appendLog('Runtime-config omitido (idempotente): ${runtimeResult.reason}');
       return;
     }
 
-    _appendLog('Flutter -> Web: runtime-config enviado');
-  }
+    _appendLog(
+      'Flutter -> Web: runtime-config despachado requestId=${runtimeResult.requestId}',
+    );
 
-  Future<void> _sendFilters() async {
-    await _bridge.setFilters(widget.effectiveRuntimeConfig.defaultFilters);
-    _appendLog('Flutter -> Web: filtros enviados');
+    final runtimeAck = await _bridge.waitForRuntimeAppliedAck();
+    if (runtimeAck) {
+      _appendLog('Web -> Flutter: runtime-config ACK recibido.');
+    } else {
+      _appendLog('Web -> Flutter: runtime-config sin ACK (timeout).');
+    }
+
+    final defaultFilters = runtimeConfig.defaultFilters;
+    if (defaultFilters == null || defaultFilters.isEmpty) {
+      _appendLog('Filtros iniciales: no configurados.');
+      return;
+    }
+
+    if (runtimeAck) {
+      _appendLog('Filtros iniciales: aplicados vía runtime-config.defaultFilters (fuente única).');
+      return;
+    }
+
+    final filtersSignature = '$runtimeSignature|fallback-set-filters';
+    final filtersResult = _bridge.setFilters(
+      defaultFilters,
+      signature: filtersSignature,
+    );
+
+    if (filtersResult.skipped) {
+      _appendLog('set-filters fallback omitido (idempotente): ${filtersResult.reason}');
+      return;
+    }
+
+    _appendLog(
+      'Fallback: set-filters despachado requestId=${filtersResult.requestId}',
+    );
+
+    final filtersAck = await _bridge.waitForFiltersAppliedAck();
+    if (filtersAck) {
+      _appendLog('Web -> Flutter: set-filters ACK recibido.');
+    } else {
+      _appendLog('Web -> Flutter: set-filters sin ACK (timeout).');
+    }
   }
 
   void _handleWebEvent(String message) {
     try {
       final decoded = jsonDecode(message) as Map<String, dynamic>;
+      _bridge.onWebMessage(decoded);
       final type = decoded['type']?.toString() ?? 'unknown';
       late final ZenitWebEvent event;
 
@@ -335,6 +404,9 @@ class _ZenitWebViewSdkState extends State<ZenitWebViewSdk> {
           raw: decoded,
         );
         _appendLog('Web event: $name detail=${decoded['detail']}');
+        if (name == 'zenit:web-ready') {
+          _appendLog('Handshake event recibido desde web.');
+        }
         widget.onWebEvent?.call(event);
         return;
       }
