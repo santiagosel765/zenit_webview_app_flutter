@@ -9,7 +9,7 @@ void main() => runApp(const ExampleApp());
 
 class ExampleApp extends StatelessWidget {
   static const Map<String, dynamic> _devDefaultFiltersFallback = {
-    'PROMOTOR': 'ABIMAEL PÉREZ US',
+    'GFORMS': '3554',
   };
 
   const ExampleApp({super.key});
@@ -295,7 +295,7 @@ class _MissingCredentialsWarning extends StatelessWidget {
                 '$missing. Revisa los --dart-define para evitar loading infinito.',
               ),
             ),
-          ),
+          ],
         ),
       ),
     );
