@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 class ZenitRuntimeConfig {
   ZenitRuntimeConfig({
     required this.baseUrl,
@@ -33,5 +35,32 @@ class ZenitRuntimeConfig {
     });
 
     return payload;
+  }
+
+  String signature({String? environmentKey}) {
+    final stablePayload = _sortJsonLike(toJson());
+    final payloadAsString = jsonEncode(stablePayload);
+    final env = (environmentKey ?? '').trim();
+    if (env.isEmpty) return payloadAsString;
+    return '$env|$payloadAsString';
+  }
+
+  Object? _sortJsonLike(Object? value) {
+    if (value is Map) {
+      final sortedEntries =
+          value.entries.toList()
+            ..sort(
+              (a, b) => a.key.toString().compareTo(b.key.toString()),
+            );
+      return {
+        for (final entry in sortedEntries) entry.key.toString(): _sortJsonLike(entry.value),
+      };
+    }
+
+    if (value is List) {
+      return value.map(_sortJsonLike).toList(growable: false);
+    }
+
+    return value;
   }
 }
