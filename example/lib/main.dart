@@ -105,8 +105,10 @@ class ExampleApp extends StatelessWidget {
     final effectiveAccessToken =
         accessTokenOverride.isNotEmpty ? accessTokenOverride : resolvedEnvironment.accessToken;
 
-    if (effectiveShowDevLogs &&
-        (effectiveSdkToken?.isEmpty ?? true || effectiveAccessToken?.isEmpty ?? true)) {
+    final sdkTokenMissing = (effectiveSdkToken ?? '').isEmpty;
+    final accessTokenMissing = (effectiveAccessToken ?? '').isEmpty;
+
+    if (effectiveShowDevLogs && (sdkTokenMissing || accessTokenMissing)) {
       debugPrint(
         '⚠️ Configuración incompleta: '
         'sdkTokenSet=${effectiveSdkToken?.isNotEmpty ?? false}, '
